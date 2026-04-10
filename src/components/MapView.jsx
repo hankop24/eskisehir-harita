@@ -20,12 +20,63 @@ function normalizeText(str = '') {
     .trim()
 }
 
-function getColorByPopulation(nufus) {
-  if (nufus >= 35000) return '#c81e1e'
-  if (nufus >= 25000) return '#ea580c'
-  if (nufus >= 15000) return '#f59e0b'
-  if (nufus >= 8000) return '#93c5fd'
-  return '#8ecb8f'
+function getPopulationLevel(nufus) {
+  const value = Number(nufus) || 0
+
+  if (value >= 35000) return 5
+  if (value >= 25000) return 4
+  if (value >= 15000) return 3
+  if (value >= 8000) return 2
+  return 1
+}
+
+function getDistrictFromFeature(feature, veri) {
+  const ilceFromVeri = veri?.ilce || veri?.ilceAdi || veri?.district
+  if (ilceFromVeri) {
+    const ilce = normalizeText(ilceFromVeri)
+    if (ilce.includes('tepebasi')) return 'tepebasi'
+    if (ilce.includes('odunpazari')) return 'odunpazari'
+  }
+
+  const wikipediaText = feature?.properties?.wikipedia || ''
+  const nameText = feature?.properties?.name || ''
+
+  const combined = `${wikipediaText} ${nameText}`.toLowerCase()
+
+  if (combined.includes('tepebaşı') || combined.includes('tepebasi')) {
+    return 'tepebasi'
+  }
+
+  if (combined.includes('odunpazarı') || combined.includes('odunpazari')) {
+    return 'odunpazari'
+  }
+
+  return null
+}
+
+function getColorByDistrictAndPopulation(ilce, nufus) {
+  const level = getPopulationLevel(nufus)
+
+  // Tepebaşı = kırmızı tonları
+  if (ilce === 'tepebasi') {
+    if (level === 5) return '#991b1b'
+    if (level === 4) return '#b91c1c'
+    if (level === 3) return '#dc2626'
+    if (level === 2) return '#ef4444'
+    return '#fca5a5'
+  }
+
+  // Odunpazarı = mavi tonları
+  if (ilce === 'odunpazari') {
+    if (level === 5) return '#1d4ed8'
+    if (level === 4) return '#2563eb'
+    if (level === 3) return '#3b82f6'
+    if (level === 2) return '#60a5fa'
+    return '#93c5fd'
+  }
+
+  // İlçe bulunamazsa gri
+  return '#d1d5db'
 }
 
 const kitabeviIcon = new L.Icon({
@@ -60,8 +111,12 @@ function MapView({ setSelectedMahalle }) {
       (item) => normalizeText(item.ad) === normalizeText(mahalleAdi)
     )
 
+    const ilce = getDistrictFromFeature(feature, veri)
+
     return {
-      fillColor: veri ? getColorByPopulation(veri.nufus) : '#d1d5db',
+      fillColor: veri
+        ? getColorByDistrictAndPopulation(ilce, veri.nufus)
+        : '#d1d5db',
       weight: 2,
       opacity: 1,
       color: 'white',
