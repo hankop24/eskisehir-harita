@@ -77,10 +77,10 @@ export const islerKitabevleri = [
     etkiMahalleleri: [
       'Batıkent Mahallesi',
       'Çamlıca Mahallesi',
-      'Şirintepe Mahallesi',
+      'Sümer Mahallesi',
       'Ertuğrulgazi Mahallesi',
       'Sazova Mahallesi',
-      'Uluönder Mahallesi'
+      'Osmangazi Mahallesi'
     ]
   },
 
