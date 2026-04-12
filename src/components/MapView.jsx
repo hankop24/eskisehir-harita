@@ -1,5 +1,5 @@
-import { useEffect, useRef, useState } from 'react'
-import { GeoJSON, MapContainer, Marker, Popup } from 'react-leaflet'
+import { useEffect, useMemo, useRef, useState } from 'react'
+import { GeoJSON, MapContainer, Marker, useMap } from 'react-leaflet'
 import L from 'leaflet'
 import { mahalleVeri } from '../data/mahalleVeri'
 import { islerKitabevleri } from '../data/islerKitabevleri'
@@ -18,6 +18,13 @@ function normalizeText(str = '') {
     .replace(/mahallesi/g, '')
     .replace(/mah/g, '')
     .trim()
+}
+
+function formatNumber(value) {
+  if (value === undefined || value === null || value === '') return '-'
+  const num = Number(String(value).replace(/\./g, '').replace(',', '.'))
+  if (Number.isNaN(num)) return value
+  return num.toLocaleString('tr-TR')
 }
 
 function getPopulationLevel(nufus) {
@@ -40,7 +47,6 @@ function getDistrictFromFeature(feature, veri) {
 
   const wikipediaText = feature?.properties?.wikipedia || ''
   const nameText = feature?.properties?.name || ''
-
   const combined = `${wikipediaText} ${nameText}`.toLowerCase()
 
   if (combined.includes('tepebaşı') || combined.includes('tepebasi')) {
@@ -57,7 +63,6 @@ function getDistrictFromFeature(feature, veri) {
 function getColorByDistrictAndPopulation(ilce, nufus) {
   const level = getPopulationLevel(nufus)
 
-  // Tepebaşı = kırmızı tonları
   if (ilce === 'tepebasi') {
     if (level === 5) return '#991b1b'
     if (level === 4) return '#b91c1c'
@@ -66,7 +71,6 @@ function getColorByDistrictAndPopulation(ilce, nufus) {
     return '#fca5a5'
   }
 
-  // Odunpazarı = mavi tonları
   if (ilce === 'odunpazari') {
     if (level === 5) return '#1d4ed8'
     if (level === 4) return '#2563eb'
@@ -75,23 +79,154 @@ function getColorByDistrictAndPopulation(ilce, nufus) {
     return '#93c5fd'
   }
 
-  // İlçe bulunamazsa gri
   return '#d1d5db'
 }
 
-const kitabeviIcon = new L.Icon({
+function getFeatureMahalleName(feature) {
+  return (
+    feature?.properties?.name ||
+    feature?.properties?.ad ||
+    feature?.properties?.MAHALLE ||
+    ''
+  )
+}
+
+function isMahalleInSelectedSube(mahalleAdi, selectedSube) {
+  if (!selectedSube) return true
+
+  const etkiListesi = selectedSube.etkiMahalleleri || []
+
+  return etkiListesi.some(
+    (item) => normalizeText(item) === normalizeText(mahalleAdi)
+  )
+}
+
+const aktifSubeIcon = new L.Icon({
   iconUrl: 'https://unpkg.com/leaflet@1.9.4/dist/images/marker-icon.png',
   iconRetinaUrl: 'https://unpkg.com/leaflet@1.9.4/dist/images/marker-icon-2x.png',
   shadowUrl: 'https://unpkg.com/leaflet@1.9.4/dist/images/marker-shadow.png',
   iconSize: [25, 41],
   iconAnchor: [12, 41],
-  popupAnchor: [1, -34],
-  shadowSize: [41, 41],
+  shadowSize: [41, 41]
 })
+
+const aktifSubeIconFaded = new L.Icon({
+  iconUrl: 'https://unpkg.com/leaflet@1.9.4/dist/images/marker-icon.png',
+  iconRetinaUrl: 'https://unpkg.com/leaflet@1.9.4/dist/images/marker-icon-2x.png',
+  shadowUrl: 'https://unpkg.com/leaflet@1.9.4/dist/images/marker-shadow.png',
+  iconSize: [25, 41],
+  iconAnchor: [12, 41],
+  shadowSize: [41, 41],
+  className: 'leaflet-marker-icon faded-marker'
+})
+
+const potansiyelSubeIcon = L.divIcon({
+  className: 'custom-marker',
+  html: `
+    <div style="
+      width: 20px;
+      height: 20px;
+      border-radius: 50%;
+      background: #a855f7;
+      border: 3px solid white;
+      box-shadow: 0 0 0 5px rgba(168, 85, 247, 0.25);
+      position: relative;
+    ">
+      <div style="
+        position: absolute;
+        inset: -6px;
+        border-radius: 50%;
+        border: 2px dashed rgba(168, 85, 247, 0.7);
+      "></div>
+    </div>
+  `,
+  iconSize: [20, 20],
+  iconAnchor: [10, 10]
+})
+
+const potansiyelSubeIconFaded = L.divIcon({
+  className: 'custom-marker faded-marker',
+  html: `
+    <div style="
+      width: 20px;
+      height: 20px;
+      border-radius: 50%;
+      background: #a855f7;
+      border: 3px solid white;
+      box-shadow: 0 0 0 5px rgba(168, 85, 247, 0.10);
+      position: relative;
+      opacity: 0.3;
+    ">
+      <div style="
+        position: absolute;
+        inset: -6px;
+        border-radius: 50%;
+        border: 2px dashed rgba(168, 85, 247, 0.28);
+      "></div>
+    </div>
+  `,
+  iconSize: [20, 20],
+  iconAnchor: [10, 10]
+})
+
+function FocusToSelection({ selectedSube, activeGeoData }) {
+  const map = useMap()
+
+  useEffect(() => {
+    if (!selectedSube || !activeGeoData?.features?.length) return
+
+    const layer = L.geoJSON(activeGeoData)
+    const bounds = layer.getBounds()
+
+    if (bounds.isValid()) {
+      map.fitBounds(bounds, {
+        paddingTopLeft: [40, 220],
+        paddingBottomRight: [40, 40],
+        maxZoom: 13
+      })
+    }
+  }, [map, selectedSube, activeGeoData])
+
+  return null
+}
+
+function MiniCard({ title, value }) {
+  return (
+    <div
+      style={{
+        background: '#f9fafb',
+        border: '1px solid #e5e7eb',
+        borderRadius: '12px',
+        padding: '12px'
+      }}
+    >
+      <div
+        style={{
+          fontSize: '11px',
+          color: '#6b7280',
+          marginBottom: '6px'
+        }}
+      >
+        {title}
+      </div>
+      <div
+        style={{
+          fontSize: '22px',
+          fontWeight: 800,
+          color: '#111827'
+        }}
+      >
+        {value}
+      </div>
+    </div>
+  )
+}
 
 function MapView({ setSelectedMahalle }) {
   const [geoData, setGeoData] = useState(null)
+  const [selectedSube, setSelectedSube] = useState(null)
   const selectedLayerRef = useRef(null)
+  const activeGeoJsonRef = useRef(null)
 
   useEffect(() => {
     fetch('/mahalleler.geojson')
@@ -100,12 +235,58 @@ function MapView({ setSelectedMahalle }) {
       .catch((err) => console.error('GeoJSON yüklenemedi:', err))
   }, [])
 
-  const getFeatureStyle = (feature) => {
-    const mahalleAdi =
-      feature.properties?.name ||
-      feature.properties?.ad ||
-      feature.properties?.MAHALLE ||
-      ''
+  const selectedSubeMahalleleri = useMemo(() => {
+    if (!selectedSube) return []
+
+    return mahalleVeri.filter((item) =>
+      (selectedSube.etkiMahalleleri || []).some(
+        (mahalle) => normalizeText(mahalle) === normalizeText(item.ad)
+      )
+    )
+  }, [selectedSube])
+
+  const selectedSubeStats = useMemo(() => {
+    if (!selectedSube) return null
+
+    const toplamNufus = selectedSubeMahalleleri.reduce(
+      (sum, item) => sum + (Number(item.nufus) || 0),
+      0
+    )
+
+    const toplamOkul = selectedSubeMahalleleri.reduce((sum, item) => {
+      return sum + (Array.isArray(item.okullar) ? item.okullar.length : 0)
+    }, 0)
+
+    const okulAdlari = selectedSubeMahalleleri.flatMap((item) =>
+      Array.isArray(item.okullar)
+        ? item.okullar.map((okul) =>
+            typeof okul === 'string' ? okul : okul.ad || 'İsimsiz Okul'
+          )
+        : []
+    )
+
+    return {
+      mahalleSayisi: selectedSubeMahalleleri.length,
+      toplamNufus,
+      toplamOkul,
+      mahalleAdlari: selectedSubeMahalleleri.map((item) => item.ad),
+      okulAdlari
+    }
+  }, [selectedSube, selectedSubeMahalleleri])
+
+  const activeGeoData = useMemo(() => {
+    if (!geoData || !selectedSube) return null
+
+    return {
+      ...geoData,
+      features: geoData.features.filter((feature) =>
+        isMahalleInSelectedSube(getFeatureMahalleName(feature), selectedSube)
+      )
+    }
+  }, [geoData, selectedSube])
+
+  const getBaseFeatureStyle = (feature) => {
+    const mahalleAdi = getFeatureMahalleName(feature)
 
     const veri = mahalleVeri.find(
       (item) => normalizeText(item.ad) === normalizeText(mahalleAdi)
@@ -120,35 +301,69 @@ function MapView({ setSelectedMahalle }) {
       weight: 2,
       opacity: 1,
       color: 'white',
-      fillOpacity: 0.9,
+      fillOpacity: 0.9
     }
   }
 
-  const onEachFeature = (feature, layer) => {
-    const mahalleAdi =
-      feature.properties?.name ||
-      feature.properties?.ad ||
-      feature.properties?.MAHALLE ||
-      ''
+  const getFadedFeatureStyle = () => {
+    return {
+      fillColor: '#cbd5e1',
+      weight: 1,
+      opacity: 0.28,
+      color: '#cbd5e1',
+      fillOpacity: 0.12,
+      interactive: false
+    }
+  }
+
+  const resetActiveStyles = () => {
+    if (activeGeoJsonRef.current) {
+      activeGeoJsonRef.current.resetStyle()
+    }
+    selectedLayerRef.current = null
+  }
+
+  const handleSubeClick = (sube) => {
+    setSelectedSube(sube)
+    setSelectedMahalle(null)
+    selectedLayerRef.current = null
+  }
+
+  const clearSubeFilter = () => {
+    setSelectedSube(null)
+    setSelectedMahalle(null)
+    selectedLayerRef.current = null
+  }
+
+  const onEachActiveFeature = (feature, layer) => {
+    const mahalleAdi = getFeatureMahalleName(feature)
 
     const veri = mahalleVeri.find(
       (item) => normalizeText(item.ad) === normalizeText(mahalleAdi)
     )
 
+    if (veri) {
+      layer.bindTooltip(
+        `<strong>${veri.ad}</strong><br/>Nüfus: ${formatNumber(veri.nufus)}`,
+        { sticky: true }
+      )
+    } else if (mahalleAdi) {
+      layer.bindTooltip(`<strong>${mahalleAdi}</strong>`, { sticky: true })
+    }
+
     layer.on({
       click: () => {
-        if (selectedLayerRef.current) {
-          selectedLayerRef.current.setStyle({
-            weight: 2,
-            color: 'white',
-            fillOpacity: 0.9,
-          })
+        if (selectedLayerRef.current && selectedLayerRef.current !== layer) {
+          selectedLayerRef.current.setStyle(
+            getBaseFeatureStyle(selectedLayerRef.current.feature)
+          )
         }
 
         layer.setStyle({
+          ...getBaseFeatureStyle(feature),
           weight: 4,
           color: '#1f2937',
-          fillOpacity: 1,
+          fillOpacity: 1
         })
 
         selectedLayerRef.current = layer
@@ -160,76 +375,305 @@ function MapView({ setSelectedMahalle }) {
             ad: mahalleAdi,
             nufus: '-',
             yuzolcumu: '-',
-            okullar: [],
+            okullar: []
           })
         }
       },
       mouseover: (e) => {
         if (selectedLayerRef.current !== layer) {
           e.target.setStyle({
+            ...getBaseFeatureStyle(feature),
             weight: 3,
-            fillOpacity: 1,
+            fillOpacity: 1
           })
         }
       },
       mouseout: (e) => {
         if (selectedLayerRef.current !== layer) {
-          e.target.setStyle({
-            weight: 2,
-            color: 'white',
-            fillOpacity: 0.9,
-          })
+          e.target.setStyle(getBaseFeatureStyle(feature))
         }
-      },
+      }
     })
+  }
 
-    if (veri) {
-      layer.bindTooltip(
-        `<strong>${veri.ad}</strong><br/>Nüfus: ${Number(veri.nufus).toLocaleString('tr-TR')}`,
-        { sticky: true }
-      )
-    } else if (mahalleAdi) {
-      layer.bindTooltip(`<strong>${mahalleAdi}</strong>`, { sticky: true })
+  useEffect(() => {
+    resetActiveStyles()
+  }, [selectedSube])
+
+  const getMarkerIcon = (sube) => {
+    const aktifMi = !selectedSube || selectedSube.ad === sube.ad
+
+    if (sube.tip === 'potansiyel') {
+      return aktifMi ? potansiyelSubeIcon : potansiyelSubeIconFaded
     }
+
+    return aktifMi ? aktifSubeIcon : aktifSubeIconFaded
   }
 
   return (
-    <MapContainer
-      center={[39.7767, 30.5206]}
-      zoom={12}
-      style={{ width: '100%', height: '100%', background: '#e5e7eb' }}
-      zoomControl={true}
-    >
-      {geoData && (
-        <GeoJSON
-          data={geoData}
-          style={getFeatureStyle}
-          onEachFeature={onEachFeature}
-        />
+    <div style={{ position: 'relative', width: '100%', height: '100%' }}>
+      {selectedSube && selectedSubeStats && (
+        <div
+          style={{
+            position: 'absolute',
+            top: '14px',
+            left: '50%',
+            transform: 'translateX(-50%)',
+            zIndex: 1000,
+            display: 'flex',
+            flexDirection: 'column',
+            alignItems: 'center',
+            gap: '8px',
+            width: 'min(760px, calc(100% - 32px))'
+          }}
+        >
+          <div
+            style={{
+              width: '100%',
+              background: '#ffffff',
+              border: '1px solid #e5e7eb',
+              borderRadius: '18px',
+              padding: '14px 16px',
+              boxShadow: '0 10px 24px rgba(0,0,0,0.12)'
+            }}
+          >
+            <div
+              style={{
+                fontSize: '11px',
+                fontWeight: 800,
+                color: '#6366f1',
+                letterSpacing: '0.08em',
+                marginBottom: '6px'
+              }}
+            >
+              ŞUBE ETKİ ALANI ÖZETİ
+            </div>
+
+            <div
+              style={{
+                fontSize: '18px',
+                fontWeight: 800,
+                color: '#111827',
+                lineHeight: 1.2,
+                marginBottom: '6px'
+              }}
+            >
+              {selectedSube.ad}
+            </div>
+
+            <div
+              style={{
+                fontSize: '12px',
+                color: '#4b5563',
+                lineHeight: 1.45,
+                marginBottom: '12px'
+              }}
+            >
+              {selectedSube.tip === 'potansiyel'
+                ? 'Seçilen potansiyel lokasyonun etki alanındaki mahalle ve okul bilgileri.'
+                : 'Seçilen şubenin etki alanındaki mahalle ve okul bilgileri.'}
+            </div>
+
+            <div
+              style={{
+                display: 'grid',
+                gridTemplateColumns: 'repeat(3, minmax(0, 1fr))',
+                gap: '10px',
+                marginBottom: '10px'
+              }}
+            >
+              <MiniCard
+                title="Mahalle Sayısı"
+                value={formatNumber(selectedSubeStats.mahalleSayisi)}
+              />
+              <MiniCard
+                title="Toplam Nüfus"
+                value={formatNumber(selectedSubeStats.toplamNufus)}
+              />
+              <MiniCard
+                title="Toplam Okul"
+                value={formatNumber(selectedSubeStats.toplamOkul)}
+              />
+            </div>
+
+            <div
+              style={{
+                display: 'grid',
+                gridTemplateColumns: '1fr 1fr',
+                gap: '10px'
+              }}
+            >
+              <div
+                style={{
+                  background: '#f9fafb',
+                  border: '1px solid #e5e7eb',
+                  borderRadius: '12px',
+                  padding: '12px',
+                  minHeight: '92px'
+                }}
+              >
+                <div
+                  style={{
+                    fontSize: '12px',
+                    fontWeight: 700,
+                    color: '#111827',
+                    marginBottom: '8px'
+                  }}
+                >
+                  Mahalleler
+                </div>
+
+                <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px' }}>
+                  {selectedSubeStats.mahalleAdlari.map((ad, index) => (
+                    <span
+                      key={`${ad}-${index}`}
+                      style={{
+                        padding: '6px 9px',
+                        borderRadius: '999px',
+                        background: '#eef2ff',
+                        color: '#4338ca',
+                        fontSize: '11px',
+                        fontWeight: 600
+                      }}
+                    >
+                      {ad}
+                    </span>
+                  ))}
+                </div>
+              </div>
+
+              <div
+                style={{
+                  background: '#f9fafb',
+                  border: '1px solid #e5e7eb',
+                  borderRadius: '12px',
+                  padding: '12px',
+                  minHeight: '92px'
+                }}
+              >
+                <div
+                  style={{
+                    fontSize: '12px',
+                    fontWeight: 700,
+                    color: '#111827',
+                    marginBottom: '8px'
+                  }}
+                >
+                  Okullar
+                </div>
+
+                <div
+                  style={{
+                    maxHeight: '92px',
+                    overflowY: 'auto',
+                    paddingRight: '4px'
+                  }}
+                >
+                  {selectedSubeStats.okulAdlari.length > 0 ? (
+                    selectedSubeStats.okulAdlari.map((ad, index) => (
+                      <div
+                        key={`${ad}-${index}`}
+                        style={{
+                          fontSize: '11px',
+                          color: '#374151',
+                          padding: '4px 0',
+                          borderBottom:
+                            index !== selectedSubeStats.okulAdlari.length - 1
+                              ? '1px solid #e5e7eb'
+                              : 'none'
+                        }}
+                      >
+                        {ad}
+                      </div>
+                    ))
+                  ) : (
+                    <div style={{ fontSize: '11px', color: '#6b7280' }}>
+                      Okul bilgisi bulunamadı.
+                    </div>
+                  )}
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <button
+            onClick={clearSubeFilter}
+            style={{
+              width: '200px',
+              border: 'none',
+              background: '#111827',
+              color: '#fff',
+              borderRadius: '12px',
+              padding: '10px 14px',
+              cursor: 'pointer',
+              fontWeight: 700,
+              boxShadow: '0 8px 20px rgba(0,0,0,0.15)'
+            }}
+          >
+            Filtreyi Temizle
+          </button>
+        </div>
       )}
 
-      {islerKitabevleri.map((sube, index) => (
-        <Marker
-          key={index}
-          position={[sube.lat, sube.lng]}
-          icon={kitabeviIcon}
-        >
-          <Popup>
-            <div style={{ minWidth: '220px' }}>
-              <h3 style={{ margin: '0 0 8px 0', fontSize: '16px' }}>
-                {sube.ad}
-              </h3>
-              <p style={{ margin: '0 0 6px 0', fontSize: '14px' }}>
-                <strong>Mahalle:</strong> {sube.mahalle}
-              </p>
-              <p style={{ margin: 0, fontSize: '14px', lineHeight: '1.5' }}>
-                <strong>Adres:</strong> {sube.adres}
-              </p>
-            </div>
-          </Popup>
-        </Marker>
-      ))}
-    </MapContainer>
+      <style>
+        {`
+          .faded-marker {
+            opacity: 0.28 !important;
+            filter: grayscale(35%);
+          }
+        `}
+      </style>
+
+      <MapContainer
+        center={[39.7767, 30.5206]}
+        zoom={12}
+        style={{ width: '100%', height: '100%', background: '#e5e7eb' }}
+        zoomControl={true}
+      >
+        {!selectedSube && geoData && (
+          <GeoJSON
+            data={geoData}
+            style={getBaseFeatureStyle}
+            onEachFeature={onEachActiveFeature}
+          />
+        )}
+
+        {selectedSube && geoData && (
+          <>
+            <GeoJSON
+              data={geoData}
+              style={getFadedFeatureStyle}
+              interactive={false}
+            />
+            {activeGeoData && (
+              <GeoJSON
+                key={selectedSube.ad}
+                ref={activeGeoJsonRef}
+                data={activeGeoData}
+                style={getBaseFeatureStyle}
+                onEachFeature={onEachActiveFeature}
+              />
+            )}
+          </>
+        )}
+
+        <FocusToSelection
+          selectedSube={selectedSube}
+          activeGeoData={activeGeoData}
+        />
+
+        {islerKitabevleri.map((sube, index) => (
+          <Marker
+            key={index}
+            position={[sube.lat, sube.lng]}
+            icon={getMarkerIcon(sube)}
+            eventHandlers={{
+              click: () => handleSubeClick(sube)
+            }}
+          />
+        ))}
+      </MapContainer>
+    </div>
   )
 }
 
